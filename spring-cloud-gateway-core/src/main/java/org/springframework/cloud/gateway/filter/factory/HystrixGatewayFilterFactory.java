@@ -1,24 +1,22 @@
 /*
- * Copyright 2013-2017 the original author or authors.
+ * Copyright 2013-2019 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
 
 package org.springframework.cloud.gateway.filter.factory;
 
 import java.net.URI;
-import java.util.Arrays;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -47,26 +45,45 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.util.UriComponentsBuilder;
 
-import static com.netflix.hystrix.exception.HystrixRuntimeException.FailureType.TIMEOUT;
+import static java.util.Collections.singletonList;
+import static java.util.Optional.ofNullable;
 import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.GATEWAY_REQUEST_URL_ATTR;
+import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.HYSTRIX_EXECUTION_EXCEPTION_ATTR;
 import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.containsEncodedParts;
 
 /**
- * Depends on `spring-cloud-starter-netflix-hystrix`, {@see http://cloud.spring.io/spring-cloud-netflix/}
+ * Depends on `spring-cloud-starter-netflix-hystrix`,
+ * {@see http://cloud.spring.io/spring-cloud-netflix/}.
+ *
  * @author Spencer Gibb
  * @author Michele Mancioppi
+ * @author Olga Maciaszek-Sharma
  */
-public class HystrixGatewayFilterFactory extends AbstractGatewayFilterFactory<HystrixGatewayFilterFactory.Config> {
-	private final ObjectProvider<DispatcherHandler> dispatcherHandler;
+public class HystrixGatewayFilterFactory
+		extends AbstractGatewayFilterFactory<HystrixGatewayFilterFactory.Config> {
 
-	public HystrixGatewayFilterFactory(ObjectProvider<DispatcherHandler> dispatcherHandler) {
+	private final ObjectProvider<DispatcherHandler> dispatcherHandlerProvider;
+
+	// do not use this dispatcherHandler directly, use getDispatcherHandler() instead.
+	private volatile DispatcherHandler dispatcherHandler;
+
+	public HystrixGatewayFilterFactory(
+			ObjectProvider<DispatcherHandler> dispatcherHandlerProvider) {
 		super(Config.class);
-		this.dispatcherHandler = dispatcherHandler;
+		this.dispatcherHandlerProvider = dispatcherHandlerProvider;
+	}
+
+	private DispatcherHandler getDispatcherHandler() {
+		if (dispatcherHandler == null) {
+			dispatcherHandler = dispatcherHandlerProvider.getIfAvailable();
+		}
+
+		return dispatcherHandler;
 	}
 
 	@Override
 	public List<String> shortcutFieldOrder() {
-		return Arrays.asList(NAME_KEY);
+		return singletonList(NAME_KEY);
 	}
 
 	public GatewayFilter apply(String routeId, Consumer<Config> consumer) {
@@ -82,21 +99,25 @@ public class HystrixGatewayFilterFactory extends AbstractGatewayFilterFactory<Hy
 
 	@Override
 	public GatewayFilter apply(Config config) {
-		//TODO: if no name is supplied, generate one from command id (useful for default filter)
+		// TODO: if no name is supplied, generate one from command id (useful for default
+		// filter)
 		if (config.setter == null) {
-			Assert.notNull(config.name, "A name must be supplied for the Hystrix Command Key");
-			HystrixCommandGroupKey groupKey = HystrixCommandGroupKey.Factory.asKey(getClass().getSimpleName());
+			Assert.notNull(config.name,
+					"A name must be supplied for the Hystrix Command Key");
+			HystrixCommandGroupKey groupKey = HystrixCommandGroupKey.Factory
+					.asKey(getClass().getSimpleName());
 			HystrixCommandKey commandKey = HystrixCommandKey.Factory.asKey(config.name);
 
-			config.setter = Setter.withGroupKey(groupKey)
-					.andCommandKey(commandKey);
+			config.setter = Setter.withGroupKey(groupKey).andCommandKey(commandKey);
 		}
 
 		return (exchange, chain) -> {
-			RouteHystrixCommand command = new RouteHystrixCommand(config.setter, config.fallbackUri, exchange, chain);
+			RouteHystrixCommand command = new RouteHystrixCommand(config.setter,
+					config.fallbackUri, exchange, chain);
 
 			return Mono.create(s -> {
-				Subscription sub = command.toObservable().subscribe(s::success, s::error, s::success);
+				Subscription sub = command.toObservable().subscribe(s::success, s::error,
+						s::success);
 				s.onCancel(sub::unsubscribe);
 			}).onErrorResume((Function<Throwable, Mono<Void>>) throwable -> {
 				if (throwable instanceof HystrixRuntimeException) {
@@ -104,21 +125,24 @@ public class HystrixGatewayFilterFactory extends AbstractGatewayFilterFactory<Hy
 					HystrixRuntimeException.FailureType failureType = e.getFailureType();
 
 					switch (failureType) {
-						case TIMEOUT:
-							return Mono.error(new TimeoutException());
-						case COMMAND_EXCEPTION: {
-							Throwable cause = e.getCause();
+					case TIMEOUT:
+						return Mono.error(new TimeoutException());
+					case COMMAND_EXCEPTION: {
+						Throwable cause = e.getCause();
 
-							/*
-							 * We forsake here the null check for cause as HystrixRuntimeException will
-							 * always have a cause if the failure type is COMMAND_EXCEPTION.
-							 */
-							if (cause instanceof ResponseStatusException || AnnotatedElementUtils
-									.findMergedAnnotation(cause.getClass(), ResponseStatus.class) != null) {
-								return Mono.error(cause);
-							}
+						/*
+						 * We forsake here the null check for cause as
+						 * HystrixRuntimeException will always have a cause if the failure
+						 * type is COMMAND_EXCEPTION.
+						 */
+						if (cause instanceof ResponseStatusException
+								|| AnnotatedElementUtils.findMergedAnnotation(
+										cause.getClass(), ResponseStatus.class) != null) {
+							return Mono.error(cause);
 						}
-						default: break;
+					}
+					default:
+						break;
 					}
 				}
 				return Mono.error(throwable);
@@ -126,53 +150,12 @@ public class HystrixGatewayFilterFactory extends AbstractGatewayFilterFactory<Hy
 		};
 	}
 
-	//TODO: replace with HystrixMonoCommand that we write
-	private class RouteHystrixCommand extends HystrixObservableCommand<Void> {
-
-		private final URI fallbackUri;
-		private final ServerWebExchange exchange;
-		private final GatewayFilterChain chain;
-
-		RouteHystrixCommand(Setter setter, URI fallbackUri, ServerWebExchange exchange, GatewayFilterChain chain) {
-			super(setter);
-			this.fallbackUri = fallbackUri;
-			this.exchange = exchange;
-			this.chain = chain;
-		}
-
-		@Override
-		protected Observable<Void> construct() {
-			return RxReactiveStreams.toObservable(this.chain.filter(exchange));
-		}
-
-		@Override
-		protected Observable<Void> resumeWithFallback() {
-			if (this.fallbackUri == null) {
-				return super.resumeWithFallback();
-			}
-
-			//TODO: copied from RouteToRequestUrlFilter
-			URI uri = exchange.getRequest().getURI();
-			//TODO: assume always?
-			boolean encoded = containsEncodedParts(uri);
-			URI requestUrl = UriComponentsBuilder.fromUri(uri)
-					.host(null)
-					.port(null)
-					.uri(this.fallbackUri)
-					.build(encoded)
-					.toUri();
-			exchange.getAttributes().put(GATEWAY_REQUEST_URL_ATTR, requestUrl);
-
-			ServerHttpRequest request = this.exchange.getRequest().mutate().uri(requestUrl).build();
-			ServerWebExchange mutated = exchange.mutate().request(request).build();
-			DispatcherHandler dispatcherHandler = HystrixGatewayFilterFactory.this.dispatcherHandler.getIfAvailable();
-			return RxReactiveStreams.toObservable(dispatcherHandler.handle(mutated));
-		}
-	}
-
 	public static class Config {
+
 		private String name;
+
 		private Setter setter;
+
 		private URI fallbackUri;
 
 		public String getName() {
@@ -197,7 +180,9 @@ public class HystrixGatewayFilterFactory extends AbstractGatewayFilterFactory<Hy
 
 		public void setFallbackUri(URI fallbackUri) {
 			if (fallbackUri != null && !"forward".equals(fallbackUri.getScheme())) {
-				throw new IllegalArgumentException("Hystrix Filter currently only supports 'forward' URIs, found " + fallbackUri);
+				throw new IllegalArgumentException(
+						"Hystrix Filter currently only supports 'forward' URIs, found "
+								+ fallbackUri);
 			}
 			this.fallbackUri = fallbackUri;
 		}
@@ -206,5 +191,58 @@ public class HystrixGatewayFilterFactory extends AbstractGatewayFilterFactory<Hy
 			this.setter = setter;
 			return this;
 		}
+
 	}
+
+	// TODO: replace with HystrixMonoCommand that we write
+	private class RouteHystrixCommand extends HystrixObservableCommand<Void> {
+
+		private final URI fallbackUri;
+
+		private final ServerWebExchange exchange;
+
+		private final GatewayFilterChain chain;
+
+		RouteHystrixCommand(Setter setter, URI fallbackUri, ServerWebExchange exchange,
+				GatewayFilterChain chain) {
+			super(setter);
+			this.fallbackUri = fallbackUri;
+			this.exchange = exchange;
+			this.chain = chain;
+		}
+
+		@Override
+		protected Observable<Void> construct() {
+			return RxReactiveStreams.toObservable(this.chain.filter(exchange));
+		}
+
+		@Override
+		protected Observable<Void> resumeWithFallback() {
+			if (this.fallbackUri == null) {
+				return super.resumeWithFallback();
+			}
+
+			// TODO: copied from RouteToRequestUrlFilter
+			URI uri = exchange.getRequest().getURI();
+			// TODO: assume always?
+			boolean encoded = containsEncodedParts(uri);
+			URI requestUrl = UriComponentsBuilder.fromUri(uri).host(null).port(null)
+					.uri(this.fallbackUri).build(encoded).toUri();
+			exchange.getAttributes().put(GATEWAY_REQUEST_URL_ATTR, requestUrl);
+			addExceptionDetails();
+
+			ServerHttpRequest request = this.exchange.getRequest().mutate()
+					.uri(requestUrl).build();
+			ServerWebExchange mutated = exchange.mutate().request(request).build();
+			return RxReactiveStreams.toObservable(getDispatcherHandler().handle(mutated));
+		}
+
+		private void addExceptionDetails() {
+			Throwable executionException = getExecutionException();
+			ofNullable(executionException).ifPresent(exception -> exchange.getAttributes()
+					.put(HYSTRIX_EXECUTION_EXCEPTION_ATTR, exception));
+		}
+
+	}
+
 }

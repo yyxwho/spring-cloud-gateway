@@ -1,23 +1,28 @@
 /*
- * Copyright 2013-2017 the original author or authors.
+ * Copyright 2013-2019 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
 
 package org.springframework.cloud.gateway.filter;
 
-import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.GATEWAY_ROUTE_ATTR;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.Timer.Sample;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import reactor.core.publisher.Mono;
 
 import org.springframework.cloud.gateway.route.Route;
 import org.springframework.core.Ordered;
@@ -26,15 +31,13 @@ import org.springframework.http.server.reactive.AbstractServerHttpResponse;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.web.server.ServerWebExchange;
 
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Tags;
-import io.micrometer.core.instrument.Timer;
-import io.micrometer.core.instrument.Timer.Sample;
-import reactor.core.publisher.Mono;
+import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.GATEWAY_ROUTE_ATTR;
 
 public class GatewayMetricsFilter implements GlobalFilter, Ordered {
 
-	private MeterRegistry meterRegistry;
+	private final Log log = LogFactory.getLog(getClass());
+
+	private final MeterRegistry meterRegistry;
 
 	public GatewayMetricsFilter(MeterRegistry meterRegistry) {
 		this.meterRegistry = meterRegistry;
@@ -44,7 +47,7 @@ public class GatewayMetricsFilter implements GlobalFilter, Ordered {
 	public int getOrder() {
 		// start the timer as soon as possible and report the metric event before we write
 		// response to client
-		return NettyWriteResponseFilter.WRITE_RESPONSE_FILTER_ORDER + 1;
+		return Ordered.HIGHEST_PRECEDENCE + 10000;
 	}
 
 	@Override
@@ -93,6 +96,10 @@ public class GatewayMetricsFilter implements GlobalFilter, Ordered {
 		Route route = exchange.getAttribute(GATEWAY_ROUTE_ATTR);
 		Tags tags = Tags.of("outcome", outcome, "status", status, "routeId",
 				route.getId(), "routeUri", route.getUri().toString());
+		if (log.isTraceEnabled()) {
+			log.trace("Stopping timer 'gateway.requests' with tags " + tags);
+		}
 		sample.stop(meterRegistry.timer("gateway.requests", tags));
 	}
+
 }

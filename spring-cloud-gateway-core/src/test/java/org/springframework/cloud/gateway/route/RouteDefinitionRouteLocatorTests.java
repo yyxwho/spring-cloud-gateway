@@ -1,3 +1,19 @@
+/*
+ * Copyright 2017-2019 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.springframework.cloud.gateway.route;
 
 import java.net.URI;
@@ -5,6 +21,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.junit.Test;
+
 import org.springframework.cloud.gateway.config.GatewayProperties;
 import org.springframework.cloud.gateway.config.PropertiesRouteDefinitionLocator;
 import org.springframework.cloud.gateway.filter.FilterDefinition;
@@ -17,6 +34,7 @@ import org.springframework.cloud.gateway.filter.factory.RemoveResponseHeaderGate
 import org.springframework.cloud.gateway.handler.predicate.HostRoutePredicateFactory;
 import org.springframework.cloud.gateway.handler.predicate.PredicateDefinition;
 import org.springframework.cloud.gateway.handler.predicate.RoutePredicateFactory;
+import org.springframework.core.convert.support.DefaultConversionService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -49,7 +67,8 @@ public class RouteDefinitionRouteLocatorTests {
 
 		RouteDefinitionRouteLocator routeDefinitionRouteLocator = new RouteDefinitionRouteLocator(
 				new PropertiesRouteDefinitionLocator(gatewayProperties), predicates,
-				gatewayFilterFactories, gatewayProperties);
+				gatewayFilterFactories, gatewayProperties,
+				new DefaultConversionService());
 
 		List<Route> routes = routeDefinitionRouteLocator.getRoutes().collectList()
 				.block();
@@ -71,10 +90,13 @@ public class RouteDefinitionRouteLocatorTests {
 	}
 
 	static class TestOrderedGatewayFilterFactory extends AbstractGatewayFilterFactory {
+
 		@Override
 		public GatewayFilter apply(Object config) {
 			return new OrderedGatewayFilter((exchange, chain) -> chain.filter(exchange),
 					9999);
 		}
+
 	}
+
 }

@@ -1,11 +1,11 @@
 /*
- * Copyright 2016-2017 the original author or authors.
+ * Copyright 2016-2019 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,10 +23,11 @@ import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -55,9 +56,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import static org.assertj.core.api.Assertions.assertThat;
-
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
 @RunWith(SpringRunner.class)
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
@@ -121,16 +119,18 @@ public class ProductionConfigurationTests {
 
 	@Test
 	public void list() throws Exception {
-		ResponseEntity<List<Bar>> result = rest.exchange(
-				RequestEntity
-						.post(rest.getRestTemplate().getUriTemplateHandler()
-								.expand("/proxy"))
-						.contentType(MediaType.APPLICATION_JSON)
-						.body(Collections
-								.singletonList(Collections.singletonMap("name", "foo"))),
-				new ParameterizedTypeReference<List<Bar>>() {
-				});
-		assertThat(result.getBody().iterator().next().getName()).isEqualTo("host=localhost;foo");
+		ResponseEntity<List<Bar>> result = rest
+				.exchange(
+						RequestEntity
+								.post(rest.getRestTemplate().getUriTemplateHandler()
+										.expand("/proxy"))
+								.contentType(MediaType.APPLICATION_JSON)
+								.body(Collections.singletonList(
+										Collections.singletonMap("name", "foo"))),
+						new ParameterizedTypeReference<List<Bar>>() {
+						});
+		assertThat(result.getBody().iterator().next().getName())
+				.isEqualTo("host=localhost;foo");
 	}
 
 	@Test
@@ -175,8 +175,29 @@ public class ProductionConfigurationTests {
 						.isEqualTo("host=localhost;foobar");
 	}
 
+	@Test
+	@SuppressWarnings({ "Duplicates", "unchecked" })
+	public void headers() throws Exception {
+		Map<String, List<String>> headers = rest.exchange(RequestEntity
+				.get(rest.getRestTemplate().getUriTemplateHandler()
+						.expand("/proxy/headers"))
+				.header("foo", "bar").header("abc", "xyz").build(), Map.class).getBody();
+		assertThat(headers).doesNotContainKey("foo").doesNotContainKey("hello")
+				.containsKeys("bar", "abc");
+
+		assertThat(headers.get("bar")).containsOnly("hello");
+		assertThat(headers.get("abc")).containsOnly("123");
+	}
+
 	@SpringBootApplication
 	static class TestApplication {
+
+		@Autowired
+		private ProxyController controller;
+
+		public void setHome(URI home) {
+			controller.setHome(home);
+		}
 
 		@RestController
 		static class ProxyController {
@@ -188,14 +209,14 @@ public class ProductionConfigurationTests {
 			}
 
 			@GetMapping("/proxy/{id}")
-			public Mono<ResponseEntity<Object>> proxyFoos(@PathVariable Integer id, ProxyExchange<Object> proxy)
-					throws Exception {
+			public Mono<ResponseEntity<Object>> proxyFoos(@PathVariable Integer id,
+					ProxyExchange<Object> proxy) throws Exception {
 				return proxy.uri(home.toString() + "/foos/" + id).get();
 			}
 
 			@GetMapping("/proxy/path/**")
-			public Mono<ResponseEntity<Object>> proxyPath(ProxyExchange<Object> proxy, UriComponentsBuilder uri)
-					throws Exception {
+			public Mono<ResponseEntity<Object>> proxyPath(ProxyExchange<Object> proxy,
+					UriComponentsBuilder uri) throws Exception {
 				String path = proxy.path("/proxy/path/");
 				return proxy.uri(home.toString() + "/foos/" + path).get();
 			}
@@ -208,20 +229,21 @@ public class ProductionConfigurationTests {
 			}
 
 			@GetMapping("/proxy/typeless/**")
-			public Mono<ResponseEntity<byte[]>> proxyTypeless(ProxyExchange<byte[]> proxy, UriComponentsBuilder uri)
-					throws Exception {
+			public Mono<ResponseEntity<byte[]>> proxyTypeless(ProxyExchange<byte[]> proxy,
+					UriComponentsBuilder uri) throws Exception {
 				String path = proxy.path("/proxy/typeless");
 				return proxy.uri(home.toString() + path).get();
 			}
 
 			@GetMapping("/proxy/missing/{id}")
-			public Mono<ResponseEntity<Object>> proxyMissing(@PathVariable Integer id, ProxyExchange<Object> proxy)
-					throws Exception {
+			public Mono<ResponseEntity<Object>> proxyMissing(@PathVariable Integer id,
+					ProxyExchange<Object> proxy) throws Exception {
 				return proxy.uri(home.toString() + "/missing/" + id).get();
 			}
 
 			@GetMapping("/proxy")
-			public Mono<ResponseEntity<Object>> proxyUri(ProxyExchange<Object> proxy) throws Exception {
+			public Mono<ResponseEntity<Object>> proxyUri(ProxyExchange<Object> proxy)
+					throws Exception {
 				return proxy.uri(home.toString() + "/foos").get();
 			}
 
@@ -235,7 +257,8 @@ public class ProductionConfigurationTests {
 			}
 
 			@PostMapping("/proxy")
-			public Mono<ResponseEntity<List<Object>>> barsWithNoBody(ProxyExchange<List<Object>> proxy) throws Exception {
+			public Mono<ResponseEntity<List<Object>>> barsWithNoBody(
+					ProxyExchange<List<Object>> proxy) throws Exception {
 				return proxy.uri(home.toString() + "/bars").post();
 			}
 
@@ -269,19 +292,23 @@ public class ProductionConfigurationTests {
 								.body(response.getBody().iterator().next()));
 			}
 
+			@GetMapping("/proxy/headers")
+			public Mono<ResponseEntity<Map<String, List<String>>>> headers(
+					ProxyExchange<Map<String, List<String>>> proxy) {
+				proxy.sensitive("foo");
+				proxy.sensitive("hello");
+				proxy.header("bar", "hello");
+				proxy.header("abc", "123");
+				proxy.header("hello", "world");
+				return proxy.uri(home.toString() + "/headers").get();
+			}
+
 			private <T> ResponseEntity<T> first(ResponseEntity<List<T>> response) {
 				return ResponseEntity.status(response.getStatusCode())
 						.headers(response.getHeaders())
 						.body(response.getBody().iterator().next());
 			}
 
-		}
-
-		@Autowired
-		private ProxyController controller;
-
-		public void setHome(URI home) {
-			controller.setHome(home);
 		}
 
 		@RestController
@@ -308,16 +335,22 @@ public class ProductionConfigurationTests {
 				return Arrays.asList(new Bar(custom + foos.iterator().next().getName()));
 			}
 
+			@GetMapping("/headers")
+			public Map<String, List<String>> headers(@RequestHeader HttpHeaders headers) {
+				return headers;
+			}
+
 		}
 
 		@JsonIgnoreProperties(ignoreUnknown = true)
 		static class Foo {
+
 			private String name;
 
-			public Foo() {
+			Foo() {
 			}
 
-			public Foo(String name) {
+			Foo(String name) {
 				this.name = name;
 			}
 
@@ -328,16 +361,18 @@ public class ProductionConfigurationTests {
 			public void setName(String name) {
 				this.name = name;
 			}
+
 		}
 
 		@JsonIgnoreProperties(ignoreUnknown = true)
 		static class Bar {
+
 			private String name;
 
-			public Bar() {
+			Bar() {
 			}
 
-			public Bar(String name) {
+			Bar(String name) {
 				this.name = name;
 			}
 
@@ -348,6 +383,7 @@ public class ProductionConfigurationTests {
 			public void setName(String name) {
 				this.name = name;
 			}
+
 		}
 
 	}
