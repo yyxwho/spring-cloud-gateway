@@ -26,19 +26,16 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfiguration;
 import org.springframework.cloud.gateway.filter.ratelimit.RedisRateLimiter;
+import org.springframework.cloud.gateway.support.ConfigurationService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
-import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
-import org.springframework.data.redis.serializer.RedisSerializationContext;
-import org.springframework.data.redis.serializer.RedisSerializer;
-import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.scripting.support.ResourceScriptSource;
-import org.springframework.validation.Validator;
 import org.springframework.web.reactive.DispatcherHandler;
 
 @Configuration
@@ -59,24 +56,11 @@ class GatewayRedisAutoConfiguration {
 	}
 
 	@Bean
-	// TODO: replace with ReactiveStringRedisTemplate in future
-	public ReactiveRedisTemplate<String, String> stringReactiveRedisTemplate(
-			ReactiveRedisConnectionFactory reactiveRedisConnectionFactory) {
-		RedisSerializer<String> serializer = new StringRedisSerializer();
-		RedisSerializationContext<String, String> serializationContext = RedisSerializationContext
-				.<String, String>newSerializationContext().key(serializer)
-				.value(serializer).hashKey(serializer).hashValue(serializer).build();
-		return new ReactiveRedisTemplate<>(reactiveRedisConnectionFactory,
-				serializationContext);
-	}
-
-	@Bean
 	@ConditionalOnMissingBean
-	public RedisRateLimiter redisRateLimiter(
-			ReactiveRedisTemplate<String, String> redisTemplate,
+	public RedisRateLimiter redisRateLimiter(ReactiveStringRedisTemplate redisTemplate,
 			@Qualifier(RedisRateLimiter.REDIS_SCRIPT_NAME) RedisScript<List<Long>> redisScript,
-			Validator validator) {
-		return new RedisRateLimiter(redisTemplate, redisScript, validator);
+			ConfigurationService configurationService) {
+		return new RedisRateLimiter(redisTemplate, redisScript, configurationService);
 	}
 
 }

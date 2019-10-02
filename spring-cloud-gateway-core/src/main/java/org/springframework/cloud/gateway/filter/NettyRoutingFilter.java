@@ -21,9 +21,10 @@ import java.util.List;
 
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpMethod;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.netty.NettyPipeline;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.http.client.HttpClientResponse;
 
@@ -58,6 +59,8 @@ import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.s
  * @author Biju Kunjummen
  */
 public class NettyRoutingFilter implements GlobalFilter, Ordered {
+
+	private static final Log log = LogFactory.getLog(NettyRoutingFilter.class);
 
 	private final HttpClient httpClient;
 
@@ -103,92 +106,87 @@ public class NettyRoutingFilter implements GlobalFilter, Ordered {
 		ServerHttpRequest request = exchange.getRequest();
 
 		final HttpMethod method = HttpMethod.valueOf(request.getMethodValue());
-		final String url = requestUrl.toString();
+		final String url = requestUrl.toASCIIString();
 
 		HttpHeaders filtered = filterRequest(getHeadersFilters(), exchange);
 
 		final DefaultHttpHeaders httpHeaders = new DefaultHttpHeaders();
 		filtered.forEach(httpHeaders::set);
 
-		String transferEncoding = request.getHeaders()
-				.getFirst(HttpHeaders.TRANSFER_ENCODING);
-		boolean chunkedTransfer = "chunked".equalsIgnoreCase(transferEncoding);
-
 		boolean preserveHost = exchange
 				.getAttributeOrDefault(PRESERVE_HOST_HEADER_ATTRIBUTE, false);
 
-		Flux<HttpClientResponse> responseFlux = this.httpClient
-				.chunkedTransfer(chunkedTransfer).request(method).uri(url)
-				.send((req, nettyOutbound) -> {
-					req.headers(httpHeaders);
+		Flux<HttpClientResponse> responseFlux = this.httpClient.headers(headers -> {
+			headers.add(httpHeaders);
+			if (preserveHost) {
+				String host = request.getHeaders().getFirst(HttpHeaders.HOST);
+				headers.add(HttpHeaders.HOST, host);
+			}
+		}).request(method).uri(url).send((req, nettyOutbound) -> {
+			if (log.isTraceEnabled()) {
+				nettyOutbound.withConnection(connection -> log.trace(
+						"outbound route: " + connection.channel().id().asShortText()
+								+ ", inbound: " + exchange.getLogPrefix()));
+			}
+			return nettyOutbound.send(request.getBody()
+					.map(dataBuffer -> ((NettyDataBuffer) dataBuffer).getNativeBuffer()));
+		}).responseConnection((res, connection) -> {
 
-					if (preserveHost) {
-						String host = request.getHeaders().getFirst(HttpHeaders.HOST);
-						req.header(HttpHeaders.HOST, host);
-					}
-					return nettyOutbound.options(NettyPipeline.SendOptions::flushOnEach)
-							.send(request.getBody()
-									.map(dataBuffer -> ((NettyDataBuffer) dataBuffer)
-											.getNativeBuffer()));
-				}).responseConnection((res, connection) -> {
-					ServerHttpResponse response = exchange.getResponse();
-					// put headers and status so filters can modify the response
-					HttpHeaders headers = new HttpHeaders();
+			// Defer committing the response until all route filters have run
+			// Put client response as ServerWebExchange attribute and write
+			// response later NettyWriteResponseFilter
+			exchange.getAttributes().put(CLIENT_RESPONSE_ATTR, res);
+			exchange.getAttributes().put(CLIENT_RESPONSE_CONN_ATTR, connection);
 
-					res.responseHeaders().forEach(
-							entry -> headers.add(entry.getKey(), entry.getValue()));
+			ServerHttpResponse response = exchange.getResponse();
+			// put headers and status so filters can modify the response
+			HttpHeaders headers = new HttpHeaders();
 
-					String contentTypeValue = headers.getFirst(HttpHeaders.CONTENT_TYPE);
-					if (StringUtils.hasLength(contentTypeValue)) {
-						exchange.getAttributes().put(ORIGINAL_RESPONSE_CONTENT_TYPE_ATTR,
-								contentTypeValue);
-					}
+			res.responseHeaders()
+					.forEach(entry -> headers.add(entry.getKey(), entry.getValue()));
 
-					HttpStatus status = HttpStatus.resolve(res.status().code());
-					if (status != null) {
-						response.setStatusCode(status);
-					}
-					else if (response instanceof AbstractServerHttpResponse) {
-						// https://jira.spring.io/browse/SPR-16748
-						((AbstractServerHttpResponse) response)
-								.setStatusCodeValue(res.status().code());
-					}
-					else {
-						throw new IllegalStateException(
-								"Unable to set status code on response: "
-										+ res.status().code() + ", "
-										+ response.getClass());
-					}
+			String contentTypeValue = headers.getFirst(HttpHeaders.CONTENT_TYPE);
+			if (StringUtils.hasLength(contentTypeValue)) {
+				exchange.getAttributes().put(ORIGINAL_RESPONSE_CONTENT_TYPE_ATTR,
+						contentTypeValue);
+			}
 
-					// make sure headers filters run after setting status so it is
-					// available in response
-					HttpHeaders filteredResponseHeaders = HttpHeadersFilter.filter(
-							getHeadersFilters(), headers, exchange, Type.RESPONSE);
+			HttpStatus status = HttpStatus.resolve(res.status().code());
+			if (status != null) {
+				response.setStatusCode(status);
+			}
+			else if (response instanceof AbstractServerHttpResponse) {
+				// https://jira.spring.io/browse/SPR-16748
+				((AbstractServerHttpResponse) response)
+						.setStatusCodeValue(res.status().code());
+			}
+			else {
+				// TODO: log warning here, not throw error?
+				throw new IllegalStateException("Unable to set status code on response: "
+						+ res.status().code() + ", " + response.getClass());
+			}
 
-					if (!filteredResponseHeaders
-							.containsKey(HttpHeaders.TRANSFER_ENCODING)
-							&& filteredResponseHeaders
-									.containsKey(HttpHeaders.CONTENT_LENGTH)) {
-						// It is not valid to have both the transfer-encoding header and
-						// the content-length header
-						// remove the transfer-encoding header in the response if the
-						// content-length header is presen
-						response.getHeaders().remove(HttpHeaders.TRANSFER_ENCODING);
-					}
+			// make sure headers filters run after setting status so it is
+			// available in response
+			HttpHeaders filteredResponseHeaders = HttpHeadersFilter
+					.filter(getHeadersFilters(), headers, exchange, Type.RESPONSE);
 
-					exchange.getAttributes().put(CLIENT_RESPONSE_HEADER_NAMES,
-							filteredResponseHeaders.keySet());
+			if (!filteredResponseHeaders.containsKey(HttpHeaders.TRANSFER_ENCODING)
+					&& filteredResponseHeaders.containsKey(HttpHeaders.CONTENT_LENGTH)) {
+				// It is not valid to have both the transfer-encoding header and
+				// the content-length header.
+				// Remove the transfer-encoding header in the response if the
+				// content-length header is present.
+				response.getHeaders().remove(HttpHeaders.TRANSFER_ENCODING);
+			}
 
-					response.getHeaders().putAll(filteredResponseHeaders);
+			exchange.getAttributes().put(CLIENT_RESPONSE_HEADER_NAMES,
+					filteredResponseHeaders.keySet());
 
-					// Defer committing the response until all route filters have run
-					// Put client response as ServerWebExchange attribute and write
-					// response later NettyWriteResponseFilter
-					exchange.getAttributes().put(CLIENT_RESPONSE_ATTR, res);
-					exchange.getAttributes().put(CLIENT_RESPONSE_CONN_ATTR, connection);
+			response.getHeaders().putAll(filteredResponseHeaders);
 
-					return Mono.just(res);
-				});
+			return Mono.just(res);
+		});
 
 		if (properties.getResponseTimeout() != null) {
 			responseFlux = responseFlux.timeout(properties.getResponseTimeout(),

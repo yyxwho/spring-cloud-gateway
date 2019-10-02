@@ -34,6 +34,7 @@ import rx.Subscription;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.cloud.gateway.filter.GatewayFilter;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
+import org.springframework.cloud.gateway.support.ServiceUnavailableException;
 import org.springframework.cloud.gateway.support.TimeoutException;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.http.server.reactive.ServerHttpRequest;
@@ -47,13 +48,14 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import static java.util.Collections.singletonList;
 import static java.util.Optional.ofNullable;
+import static org.springframework.cloud.gateway.support.GatewayToStringStyler.filterToStringCreator;
 import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.GATEWAY_REQUEST_URL_ATTR;
 import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.HYSTRIX_EXECUTION_EXCEPTION_ATTR;
 import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.containsEncodedParts;
 
 /**
  * Depends on `spring-cloud-starter-netflix-hystrix`,
- * {@see http://cloud.spring.io/spring-cloud-netflix/}.
+ * {@see https://cloud.spring.io/spring-cloud-netflix/}.
  *
  * @author Spencer Gibb
  * @author Michele Mancioppi
@@ -86,6 +88,8 @@ public class HystrixGatewayFilterFactory
 		return singletonList(NAME_KEY);
 	}
 
+	@Override
+	// TODO: make Config implement HasRouteId and remove this method.
 	public GatewayFilter apply(String routeId, Consumer<Config> consumer) {
 		Config config = newConfig();
 		consumer.accept(config);
@@ -95,6 +99,17 @@ public class HystrixGatewayFilterFactory
 		}
 
 		return apply(config);
+	}
+
+	/**
+	 * Create a {@link Setter} based on incoming request attribute. <br>
+	 * This could be useful for example to create a Setter with {@link HystrixCommandKey}
+	 * being set as the target service's host:port, as obtained from
+	 * {@link ServerWebExchange#getRequest()} to do per service instance level circuit
+	 * breaking.
+	 */
+	protected Setter createCommandSetter(Config config, ServerWebExchange exchange) {
+		return config.setter;
 	}
 
 	@Override
@@ -111,42 +126,58 @@ public class HystrixGatewayFilterFactory
 			config.setter = Setter.withGroupKey(groupKey).andCommandKey(commandKey);
 		}
 
-		return (exchange, chain) -> {
-			RouteHystrixCommand command = new RouteHystrixCommand(config.setter,
-					config.fallbackUri, exchange, chain);
+		return new GatewayFilter() {
+			@Override
+			public Mono<Void> filter(ServerWebExchange exchange,
+					GatewayFilterChain chain) {
+				RouteHystrixCommand command = new RouteHystrixCommand(
+						createCommandSetter(config, exchange), config.fallbackUri,
+						exchange, chain);
 
-			return Mono.create(s -> {
-				Subscription sub = command.toObservable().subscribe(s::success, s::error,
-						s::success);
-				s.onCancel(sub::unsubscribe);
-			}).onErrorResume((Function<Throwable, Mono<Void>>) throwable -> {
-				if (throwable instanceof HystrixRuntimeException) {
-					HystrixRuntimeException e = (HystrixRuntimeException) throwable;
-					HystrixRuntimeException.FailureType failureType = e.getFailureType();
+				return Mono.create(s -> {
+					Subscription sub = command.toObservable().subscribe(s::success,
+							s::error, s::success);
+					s.onCancel(sub::unsubscribe);
+				}).onErrorResume((Function<Throwable, Mono<Void>>) throwable -> {
+					if (throwable instanceof HystrixRuntimeException) {
+						HystrixRuntimeException e = (HystrixRuntimeException) throwable;
+						HystrixRuntimeException.FailureType failureType = e
+								.getFailureType();
 
-					switch (failureType) {
-					case TIMEOUT:
-						return Mono.error(new TimeoutException());
-					case COMMAND_EXCEPTION: {
-						Throwable cause = e.getCause();
+						switch (failureType) {
+						case TIMEOUT:
+							return Mono.error(new TimeoutException());
+						case SHORTCIRCUIT:
+							return Mono.error(new ServiceUnavailableException());
+						case COMMAND_EXCEPTION: {
+							Throwable cause = e.getCause();
 
-						/*
-						 * We forsake here the null check for cause as
-						 * HystrixRuntimeException will always have a cause if the failure
-						 * type is COMMAND_EXCEPTION.
-						 */
-						if (cause instanceof ResponseStatusException
-								|| AnnotatedElementUtils.findMergedAnnotation(
-										cause.getClass(), ResponseStatus.class) != null) {
-							return Mono.error(cause);
+							/*
+							 * We forsake here the null check for cause as
+							 * HystrixRuntimeException will always have a cause if the
+							 * failure type is COMMAND_EXCEPTION.
+							 */
+							if (cause instanceof ResponseStatusException
+									|| AnnotatedElementUtils.findMergedAnnotation(
+											cause.getClass(),
+											ResponseStatus.class) != null) {
+								return Mono.error(cause);
+							}
+						}
+						default:
+							break;
 						}
 					}
-					default:
-						break;
-					}
-				}
-				return Mono.error(throwable);
-			}).then();
+					return Mono.error(throwable);
+				}).then();
+			}
+
+			@Override
+			public String toString() {
+				return filterToStringCreator(HystrixGatewayFilterFactory.this)
+						.append("name", config.getName())
+						.append("fallback", config.fallbackUri).toString();
+			}
 		};
 	}
 
@@ -227,7 +258,7 @@ public class HystrixGatewayFilterFactory
 			// TODO: assume always?
 			boolean encoded = containsEncodedParts(uri);
 			URI requestUrl = UriComponentsBuilder.fromUri(uri).host(null).port(null)
-					.uri(this.fallbackUri).build(encoded).toUri();
+					.uri(this.fallbackUri).scheme(null).build(encoded).toUri();
 			exchange.getAttributes().put(GATEWAY_REQUEST_URL_ATTR, requestUrl);
 			addExceptionDetails();
 

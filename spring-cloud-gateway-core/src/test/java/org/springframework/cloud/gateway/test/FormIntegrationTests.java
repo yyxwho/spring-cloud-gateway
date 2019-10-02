@@ -16,22 +16,23 @@
 
 package org.springframework.cloud.gateway.test;
 
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import reactor.core.publisher.Mono;
-import reactor.test.StepVerifier;
 
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.util.LinkedMultiValueMap;
@@ -42,7 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
 import static org.springframework.cloud.gateway.test.TestUtils.getMap;
 import static org.springframework.http.MediaType.APPLICATION_FORM_URLENCODED;
-import static org.springframework.web.reactive.function.BodyExtractors.toMono;
+import static org.springframework.http.MediaType.MULTIPART_FORM_DATA;
 
 @RunWith(SpringRunner.class)
 @SpringBootTest(webEnvironment = RANDOM_PORT)
@@ -51,7 +52,7 @@ import static org.springframework.web.reactive.function.BodyExtractors.toMono;
 public class FormIntegrationTests extends BaseWebClientTests {
 
 	public static final MediaType FORM_URL_ENCODED_CONTENT_TYPE = new MediaType(
-			APPLICATION_FORM_URLENCODED, Charset.forName("UTF-8"));
+			APPLICATION_FORM_URLENCODED, StandardCharsets.UTF_8);
 
 	@Test
 	public void formUrlencodedWorks() {
@@ -59,39 +60,58 @@ public class FormIntegrationTests extends BaseWebClientTests {
 		formData.add("foo", "bar");
 		formData.add("baz", "bam");
 
+		// @formatter:off
 		testClient.post().uri("/post").contentType(FORM_URL_ENCODED_CONTENT_TYPE)
-				.body(BodyInserters.fromFormData(formData)).exchange().expectStatus()
-				.isOk().expectBody(Map.class).consumeWith(result -> {
+				.body(BodyInserters.fromFormData(formData))
+				.exchange()
+				.expectStatus().isOk()
+				.expectBody(Map.class).consumeWith(result -> {
 					Map map = result.getResponseBody();
 					Map<String, Object> form = getMap(map, "form");
 					assertThat(form).containsEntry("foo", "bar");
 					assertThat(form).containsEntry("baz", "bam");
 				});
+		// @formatter:on
 	}
 
 	@Test
-	public void multipartFormDataWorks() {
-		ClassPathResource img = new ClassPathResource("1x1.png");
+	public void multipartFormDataWorksWebClient() {
+		MultiValueMap<String, HttpEntity<?>> formData = createMultipartData();
 
-		HttpHeaders headers = new HttpHeaders();
-		headers.setContentType(MediaType.IMAGE_PNG);
+		// @formatter:off
+		testClient.post().uri("/post").contentType(MULTIPART_FORM_DATA)
+				.bodyValue(formData)
+				.exchange()
+				.expectStatus().isOk()
+				.expectBody(Map.class)
+				.consumeWith(result -> assertMultipartData(result.getResponseBody()));
+		// @formatter:on
+	}
 
-		HttpEntity<ClassPathResource> entity = new HttpEntity<>(img, headers);
+	@Test
+	public void multipartFormDataWorksRestTemplate() {
+		MultiValueMap<String, HttpEntity<?>> formData = createMultipartData();
+		TestRestTemplate rest = new TestRestTemplate();
 
-		MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
-		parts.add("imgpart", entity);
+		ResponseEntity<Map> response = rest.postForEntity(baseUri + "/post", formData,
+				Map.class);
 
-		Mono<Map> result = webClient.post().uri("/post")
-				.contentType(MediaType.MULTIPART_FORM_DATA)
-				.body(BodyInserters.fromMultipartData(parts)).exchange()
-				.flatMap(response -> response.body(toMono(Map.class)));
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertMultipartData(response.getBody());
+	}
 
-		StepVerifier.create(result).consumeNextWith(map -> {
-			Map<String, Object> files = getMap(map, "files");
-			assertThat(files).containsKey("imgpart");
-			String file = (String) files.get("imgpart");
-			assertThat(file).startsWith("data:").contains(";base64,");
-		}).expectComplete().verify(DURATION);
+	private MultiValueMap<String, HttpEntity<?>> createMultipartData() {
+		ClassPathResource part = new ClassPathResource("1x1.png");
+		MultipartBodyBuilder builder = new MultipartBodyBuilder();
+		builder.part("imgpart", part, MediaType.IMAGE_PNG);
+		return builder.build();
+	}
+
+	private void assertMultipartData(Map responseBody) {
+		Map<String, Object> files = getMap(responseBody, "files");
+		assertThat(files).containsKey("imgpart");
+		String file = (String) files.get("imgpart");
+		assertThat(file).startsWith("data:").contains(";base64,");
 	}
 
 	@EnableAutoConfiguration

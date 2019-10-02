@@ -100,6 +100,16 @@ spring:
         - RewriteResponseHeader=X-Request-Foo, password=[^&]+, password=***
 
       # =====================================
+      - id: rewrite_location_response_header_test
+        uri: ${test.uri}
+        predicates:
+        - Host=**.rewritelocationresponseheader.org
+        - Path=/headers
+        filters:
+        - AddResponseHeader=Location, https://backend.org:443/v1/some/object/id
+        - RewriteLocationResponseHeader
+
+      # =====================================
       - id: forward_test
         uri: forward:/localcontroller
         predicates:
@@ -222,7 +232,7 @@ spring:
         predicates:
         - Host=**.redirectto.org
         filters:
-        - RedirectTo=302, http://example.org
+        - RedirectTo=302, https://example.org
 
       # =====================================
       - id: remove_request_header_test
@@ -242,14 +252,6 @@ spring:
         filters:
         - AddResponseHeader=X-Request-Foo, Bar
         - RemoveResponseHeader=X-Request-Foo
-
-      # =====================================
-      - id: retry_test
-        uri: ${test.uri}
-        predicates:
-        - Path=/retry
-        filters:
-        - Retry
 
       # =====================================
       - id: secure_headers_test
@@ -293,9 +295,9 @@ spring:
         - Host=**.setreresponseheader.org
         - Path=/headers
         filters:
-        - AddResponseHeader=X-Request-Foo, Bar1
-        - AddResponseHeader=X-Request-Foo, Bar2
-        - SetResponseHeader=X-Request-Foo, Bar
+        - AddResponseHeader=X-Response-Foo, Bar1
+        - AddResponseHeader=X-Response-Foo, Bar2
+        - SetResponseHeader=X-Response-Foo, Bar
 
       # =====================================
       - id: set_status_int_test
@@ -367,6 +369,19 @@ spring:
         - name: Path
           args:
             pattern: /**
+      # =====================================
+      - id: route_with_metadata
+        uri: ${test.uri}
+        order: 10000
+        predicates:
+          - name: Path
+            args:
+              pattern: /route_with_metadata
+        metadata:
+          optionName: "OptionValue"
+          compositeObject:
+              name: "value"
+          iAmNumber: 1
 
 hystrix.command.successcmd.execution.isolation.thread.timeoutInMilliseconds: 5000
 
@@ -374,3 +389,8 @@ eureka:
   client:
     enabled: false
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"

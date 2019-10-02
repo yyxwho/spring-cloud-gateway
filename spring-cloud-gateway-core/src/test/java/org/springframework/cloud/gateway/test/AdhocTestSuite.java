@@ -24,6 +24,9 @@ import org.junit.runners.Suite;
 import org.junit.runners.Suite.SuiteClasses;
 import org.junit.runners.model.Statement;
 
+import org.springframework.cloud.gateway.filter.GatewayMetricsFilterTests;
+import org.springframework.cloud.gateway.filter.factory.RewriteLocationResponseHeaderGatewayFilterFactoryTests;
+
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assume.assumeThat;
@@ -61,6 +64,7 @@ import static org.junit.Assume.assumeThat;
 		org.springframework.cloud.gateway.filter.factory.SetPathGatewayFilterFactoryTests.class,
 		org.springframework.cloud.gateway.filter.factory.PrefixPathGatewayFilterFactoryTest.class,
 		org.springframework.cloud.gateway.filter.factory.RewriteResponseHeaderGatewayFilterFactoryUnitTests.class,
+		RewriteLocationResponseHeaderGatewayFilterFactoryTests.class,
 		org.springframework.cloud.gateway.filter.factory.RequestRateLimiterGatewayFilterFactoryTests.class,
 		org.springframework.cloud.gateway.filter.factory.RequestHeaderToRequestUriGatewayFilterFactoryIntegrationTests.class,
 		org.springframework.cloud.gateway.filter.factory.RemoveResponseHeaderGatewayFilterFactoryTests.class,
@@ -93,7 +97,7 @@ import static org.junit.Assume.assumeThat;
 		org.springframework.cloud.gateway.filter.ratelimit.RedisRateLimiterTests.class,
 		org.springframework.cloud.gateway.filter.LoadBalancerClientFilterTests.class,
 		org.springframework.cloud.gateway.filter.NettyRoutingFilterIntegrationTests.class,
-		org.springframework.cloud.gateway.filter.GatewayMetricFilterTests.class,
+		GatewayMetricsFilterTests.class,
 		org.springframework.cloud.gateway.filter.ForwardRoutingFilterTests.class,
 		org.springframework.cloud.gateway.route.RouteDefinitionRouteLocatorTests.class,
 		org.springframework.cloud.gateway.route.RouteTests.class,

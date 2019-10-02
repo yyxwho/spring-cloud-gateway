@@ -22,6 +22,8 @@ import org.junit.runner.RunWith;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.cloud.gateway.filter.GatewayFilter;
+import org.springframework.cloud.gateway.filter.factory.RedirectToGatewayFilterFactory.Config;
 import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.cloud.gateway.test.BaseWebClientTests;
@@ -32,6 +34,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.junit4.SpringRunner;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
 
 @RunWith(SpringRunner.class)
@@ -43,7 +46,7 @@ public class RedirectToGatewayFilterFactoryTests extends BaseWebClientTests {
 	public void redirectToFilterWorks() {
 		testClient.get().uri("/").header("Host", "www.redirectto.org").exchange()
 				.expectStatus().isEqualTo(HttpStatus.FOUND).expectHeader()
-				.valueEquals(HttpHeaders.LOCATION, "http://example.org");
+				.valueEquals(HttpHeaders.LOCATION, "https://example.org");
 	}
 
 	@Test
@@ -51,6 +54,15 @@ public class RedirectToGatewayFilterFactoryTests extends BaseWebClientTests {
 		testClient.get().uri("/").header("Host", "www.relativeredirect.org").exchange()
 				.expectStatus().isEqualTo(HttpStatus.FOUND).expectHeader()
 				.valueEquals(HttpHeaders.LOCATION, "/index.html#/customers");
+	}
+
+	@Test
+	public void toStringFormat() {
+		Config config = new Config();
+		config.setStatus("301");
+		config.setUrl("http://newurl");
+		GatewayFilter filter = new RedirectToGatewayFilterFactory().apply(config);
+		assertThat(filter.toString()).contains("301").contains("http://newurl");
 	}
 
 	@EnableAutoConfiguration

@@ -18,7 +18,7 @@
 	<description>Spring Cloud Gateway Dependencies</description>
 
 	<properties>
-		<rsocket.version>0.11.18</rsocket.version>
+		<roaringbitmap.version>0.8.9</roaringbitmap.version>
 	</properties>
 
 	<dependencyManagement>
@@ -45,23 +45,28 @@
 			</dependency>
 			<dependency>
 				<groupId>org.springframework.cloud</groupId>
+				<artifactId>spring-cloud-gateway-rsocket-common</artifactId>
+				<version>${project.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>org.springframework.cloud</groupId>
+				<artifactId>spring-cloud-gateway-rsocket-client</artifactId>
+				<version>${project.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>org.springframework.cloud</groupId>
+				<artifactId>spring-cloud-gateway-rsocket-broker</artifactId>
+				<version>${project.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>org.springframework.cloud</groupId>
 				<artifactId>spring-cloud-starter-gateway</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 			<dependency>
-				<groupId>io.rsocket</groupId>
-				<artifactId>rsocket-core</artifactId>
-				<version>${rsocket.version}</version>
-			</dependency>
-			<dependency>
-				<groupId>io.rsocket</groupId>
-				<artifactId>rsocket-micrometer</artifactId>
-				<version>${rsocket.version}</version>
-			</dependency>
-			<dependency>
-				<groupId>io.rsocket</groupId>
-				<artifactId>rsocket-transport-netty</artifactId>
-				<version>${rsocket.version}</version>
+				<groupId>org.roaringbitmap</groupId>
+				<artifactId>RoaringBitmap</artifactId>
+				<version>${roaringbitmap.version}</version>
 			</dependency>
 		</dependencies>
 	</dependencyManagement>

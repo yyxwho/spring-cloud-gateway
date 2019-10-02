@@ -22,28 +22,25 @@ import java.util.function.Predicate;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import reactor.core.publisher.Flux;
+import org.reactivestreams.Publisher;
 import reactor.core.publisher.Mono;
 
 import org.springframework.cloud.gateway.handler.AsyncPredicate;
-import org.springframework.core.io.buffer.DataBuffer;
-import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.cloud.gateway.support.ServerWebExchangeUtils;
 import org.springframework.http.codec.HttpMessageReader;
-import org.springframework.http.server.reactive.ServerHttpRequest;
-import org.springframework.http.server.reactive.ServerHttpRequestDecorator;
 import org.springframework.web.reactive.function.server.HandlerStrategies;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.server.ServerWebExchange;
 
-import static org.springframework.cloud.gateway.filter.AdaptCachedBodyGlobalFilter.CACHED_REQUEST_BODY_KEY;
-
 /**
- * This predicate is BETA and may be subject to change in a future release.
+ * Predicate that reads the body and applies a user provided predicate to run on the body.
+ * The body is cached in memory so that possible subsequent calls to the predicate do not
+ * need to deserialize again.
  */
 public class ReadBodyPredicateFactory
 		extends AbstractRoutePredicateFactory<ReadBodyPredicateFactory.Config> {
 
-	protected static final Log LOGGER = LogFactory.getLog(ReadBodyPredicateFactory.class);
+	protected static final Log log = LogFactory.getLog(ReadBodyPredicateFactory.class);
 
 	private static final String TEST_ATTRIBUTE = "read_body_predicate_test_attribute";
 
@@ -59,68 +56,49 @@ public class ReadBodyPredicateFactory
 	@Override
 	@SuppressWarnings("unchecked")
 	public AsyncPredicate<ServerWebExchange> applyAsync(Config config) {
-		return exchange -> {
-			Class inClass = config.getInClass();
+		return new AsyncPredicate<ServerWebExchange>() {
+			@Override
+			public Publisher<Boolean> apply(ServerWebExchange exchange) {
+				Class inClass = config.getInClass();
 
-			Object cachedBody = exchange.getAttribute(CACHE_REQUEST_BODY_OBJECT_KEY);
-			Mono<?> modifiedBody;
-			// We can only read the body from the request once, once that happens if we
-			// try to read the body again an exception will be thrown. The below if/else
-			// caches the body object as a request attribute in the ServerWebExchange
-			// so if this filter is run more than once (due to more than one route
-			// using it) we do not try to read the request body multiple times
-			if (cachedBody != null) {
-				try {
-					boolean test = config.predicate.test(cachedBody);
-					exchange.getAttributes().put(TEST_ATTRIBUTE, test);
-					return Mono.just(test);
-				}
-				catch (ClassCastException e) {
-					if (LOGGER.isDebugEnabled()) {
-						LOGGER.debug("Predicate test failed because class in predicate "
-								+ "does not match the cached body object", e);
+				Object cachedBody = exchange.getAttribute(CACHE_REQUEST_BODY_OBJECT_KEY);
+				Mono<?> modifiedBody;
+				// We can only read the body from the request once, once that happens if
+				// we try to read the body again an exception will be thrown. The below
+				// if/else caches the body object as a request attribute in the
+				// ServerWebExchange so if this filter is run more than once (due to more
+				// than one route using it) we do not try to read the request body
+				// multiple times
+				if (cachedBody != null) {
+					try {
+						boolean test = config.predicate.test(cachedBody);
+						exchange.getAttributes().put(TEST_ATTRIBUTE, test);
+						return Mono.just(test);
 					}
+					catch (ClassCastException e) {
+						if (log.isDebugEnabled()) {
+							log.debug("Predicate test failed because class in predicate "
+									+ "does not match the cached body object", e);
+						}
+					}
+					return Mono.just(false);
 				}
-				return Mono.just(false);
-			}
-			else {
-				// Join all the DataBuffers so we have a single DataBuffer for the body
-				return DataBufferUtils.join(exchange.getRequest().getBody())
-						.flatMap(dataBuffer -> {
-							// Update the retain counts so we can read the body twice,
-							// once to parse into an object
-							// that we can test the predicate against and a second time
-							// when the HTTP client sends
-							// the request downstream
-							// Note: if we end up reading the body twice we will run into
-							// a problem, but as of right
-							// now there is no good use case for doing this
-							DataBufferUtils.retain(dataBuffer);
-							// Make a slice for each read so each read has its own
-							// read/write indexes
-							Flux<DataBuffer> cachedFlux = Flux.defer(() -> Flux.just(
-									dataBuffer.slice(0, dataBuffer.readableByteCount())));
-
-							ServerHttpRequest mutatedRequest = new ServerHttpRequestDecorator(
-									exchange.getRequest()) {
-								@Override
-								public Flux<DataBuffer> getBody() {
-									return cachedFlux;
-								}
-							};
-							return ServerRequest
-									.create(exchange.mutate().request(mutatedRequest)
+				else {
+					return ServerWebExchangeUtils.cacheRequestBodyAndRequest(exchange,
+							(serverHttpRequest) -> ServerRequest
+									.create(exchange.mutate().request(serverHttpRequest)
 											.build(), messageReaders)
-									.bodyToMono(inClass).doOnNext(objectValue -> {
-										exchange.getAttributes().put(
-												CACHE_REQUEST_BODY_OBJECT_KEY,
-												objectValue);
-										exchange.getAttributes()
-												.put(CACHED_REQUEST_BODY_KEY, cachedFlux);
-									}).map(objectValue -> config.predicate
-											.test(objectValue));
-						});
+									.bodyToMono(inClass)
+									.doOnNext(objectValue -> exchange.getAttributes().put(
+											CACHE_REQUEST_BODY_OBJECT_KEY, objectValue))
+									.map(objectValue -> config.getPredicate()
+											.test(objectValue)));
+				}
+			}
 
+			@Override
+			public String toString() {
+				return String.format("ReadBody: %s", config.getInClass());
 			}
 		};
 	}

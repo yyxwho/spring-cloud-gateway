@@ -24,6 +24,7 @@ import reactor.core.publisher.Mono;
 
 import org.springframework.cloud.gateway.filter.GatewayFilter;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
+import org.springframework.cloud.gateway.filter.factory.AbstractGatewayFilterFactory.NameConfig;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.web.server.ServerWebExchange;
@@ -43,7 +44,7 @@ public class RequestHeaderToRequestUriGatewayFilterFactoryTests {
 		RequestHeaderToRequestUriGatewayFilterFactory factory = new RequestHeaderToRequestUriGatewayFilterFactory();
 		GatewayFilter filter = factory.apply(c -> c.setName("X-CF-Forwarded-Url"));
 		MockServerHttpRequest request = MockServerHttpRequest.get("http://localhost")
-				.header("X-CF-Forwarded-Url", "http://example.com").build();
+				.header("X-CF-Forwarded-Url", "https://example.com").build();
 		ServerWebExchange exchange = MockServerWebExchange.from(request);
 		exchange.getAttributes().put(GATEWAY_REQUEST_URL_ATTR,
 				URI.create("http://localhost"));
@@ -55,7 +56,7 @@ public class RequestHeaderToRequestUriGatewayFilterFactoryTests {
 		ServerWebExchange webExchange = captor.getValue();
 		URI uri = (URI) webExchange.getAttributes().get(GATEWAY_REQUEST_URL_ATTR);
 		assertThat(uri).isNotNull();
-		assertThat(uri.toString()).isEqualTo("http://example.com");
+		assertThat(uri.toString()).isEqualTo("https://example.com");
 	}
 
 	@Test
@@ -96,6 +97,15 @@ public class RequestHeaderToRequestUriGatewayFilterFactoryTests {
 		URI uri = (URI) webExchange.getAttributes().get(GATEWAY_REQUEST_URL_ATTR);
 		assertThat(uri).isNotNull();
 		assertThat(uri.toURL().toString()).isEqualTo("http://localhost");
+	}
+
+	@Test
+	public void toStringFormat() {
+		NameConfig config = new NameConfig();
+		config.setName("myname");
+		GatewayFilter filter = new RequestHeaderToRequestUriGatewayFilterFactory()
+				.apply(config);
+		assertThat(filter.toString()).contains("myname");
 	}
 
 }

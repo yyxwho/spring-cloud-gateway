@@ -33,7 +33,7 @@ public class CookieRoutePredicateFactoryTests extends BaseWebClientTests {
 
 	@Test
 	public void noCookiesForYou() {
-		MockServerHttpRequest request = MockServerHttpRequest.get("http://example.com")
+		MockServerHttpRequest request = MockServerHttpRequest.get("https://example.com")
 				.build();
 		MockServerWebExchange exchange = MockServerWebExchange.from(request);
 
@@ -45,7 +45,7 @@ public class CookieRoutePredicateFactoryTests extends BaseWebClientTests {
 
 	@Test
 	public void okOneCookieForYou() {
-		MockServerHttpRequest request = MockServerHttpRequest.get("http://example.com")
+		MockServerHttpRequest request = MockServerHttpRequest.get("https://example.com")
 				.cookie(new HttpCookie("yourcookie", "sugar"),
 						new HttpCookie("mycookie", "chip"))
 				.build();
@@ -55,6 +55,16 @@ public class CookieRoutePredicateFactoryTests extends BaseWebClientTests {
 				.apply(new Config().setName("mycookie").setRegexp("ch.p"));
 
 		assertThat(predicate.test(exchange)).isTrue();
+	}
+
+	@Test
+	public void toStringFormat() {
+		Config config = new Config();
+		config.setName("mycookie");
+		config.setRegexp("myregexp");
+		Predicate predicate = new CookieRoutePredicateFactory().apply(config);
+		assertThat(predicate.toString())
+				.contains("Cookie: name=mycookie regexp=myregexp");
 	}
 
 }

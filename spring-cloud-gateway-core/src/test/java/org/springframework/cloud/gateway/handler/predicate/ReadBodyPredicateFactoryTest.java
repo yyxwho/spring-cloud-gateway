@@ -28,6 +28,8 @@ import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.web.server.LocalServerPort;
+import org.springframework.cloud.gateway.handler.AsyncPredicate;
+import org.springframework.cloud.gateway.handler.predicate.ReadBodyPredicateFactory.Config;
 import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.cloud.gateway.test.PermitAllSecurityConfiguration;
@@ -45,7 +47,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.web.server.ServerWebExchange;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
 
 /**
@@ -76,11 +80,21 @@ public class ReadBodyPredicateFactoryTest {
 
 	}
 
+	@Test
+	public void toStringFormat() {
+		Config config = new Config();
+		config.setInClass(String.class);
+		AsyncPredicate<ServerWebExchange> predicate = new ReadBodyPredicateFactory()
+				.applyAsync(config);
+		assertThat(predicate.toString()).contains("ReadBody: " + config.getInClass());
+	}
+
 	@EnableAutoConfiguration
 	@SpringBootConfiguration
 	@RibbonClients({
 			@RibbonClient(name = "message", configuration = TestRibbonConfig.class),
-			@RibbonClient(name = "messageChannel", configuration = TestRibbonConfig.class) })
+			@RibbonClient(name = "messageChannel",
+					configuration = TestRibbonConfig.class) })
 	@Import(PermitAllSecurityConfiguration.class)
 	@RestController
 	public static class TestConfig {
@@ -103,12 +117,14 @@ public class ReadBodyPredicateFactoryTest {
 			return r -> r.getFoo().equals(type);
 		}
 
-		@PostMapping(path = "message/events", produces = MediaType.APPLICATION_JSON_UTF8_VALUE)
+		@PostMapping(path = "message/events",
+				produces = MediaType.APPLICATION_JSON_UTF8_VALUE)
 		public String messageEvents(@RequestBody Event e) {
 			return "{\"headers\":{\"Hello\":\"World\"}}";
 		}
 
-		@PostMapping(path = "messageChannel/events", produces = MediaType.APPLICATION_JSON_UTF8_VALUE)
+		@PostMapping(path = "messageChannel/events",
+				produces = MediaType.APPLICATION_JSON_UTF8_VALUE)
 		public String messageChannelEvents(@RequestBody Event e) {
 			return "{\"headers\":{\"World\":\"Hello\"}}";
 		}
@@ -127,36 +143,36 @@ public class ReadBodyPredicateFactoryTest {
 
 	}
 
-}
+	static class Event {
 
-class Event {
+		private String foo;
 
-	private String foo;
+		private String bar;
 
-	private String bar;
+		Event() {
+		}
 
-	Event() {
-	}
+		Event(String foo, String bar) {
+			this.foo = foo;
+			this.bar = bar;
+		}
 
-	Event(String foo, String bar) {
-		this.foo = foo;
-		this.bar = bar;
-	}
+		public String getFoo() {
+			return foo;
+		}
 
-	public String getFoo() {
-		return foo;
-	}
+		public void setFoo(String foo) {
+			this.foo = foo;
+		}
 
-	public void setFoo(String foo) {
-		this.foo = foo;
-	}
+		public String getBar() {
+			return bar;
+		}
 
-	public String getBar() {
-		return bar;
-	}
+		public void setBar(String bar) {
+			this.bar = bar;
+		}
 
-	public void setBar(String bar) {
-		this.bar = bar;
 	}
 
 }
